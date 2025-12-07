@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Pnode {
+  id                Int               @id @default(autoincrement())
+  address           String            @unique          // "ip:port" from get-pods
+  version           String?                            // pNode version
+  lastSeen          DateTime?                          // derived from last_seen_timestamp
+  lastSeenTimestamp BigInt?                            // raw unix timestamp (seconds)
+  reachable         Boolean           @default(false)
+
+  lastError         String?           // optional: store last connection error
+  failureCount      Int?              
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  samples           PnodeStatSample[]
+}
+
+model PnodeStatSample {
+  id              Int      @id @default(autoincrement())
+  pnode           Pnode    @relation(fields: [pnodeId], references: [id])
+  pnodeId         Int
+
+  timestamp       DateTime @default(now())  // when this sample was collected
+
+  // CPU / RAM / uptime
+  cpuPercent      Float?
+  ramUsedBytes    BigInt?
+  ramTotalBytes   BigInt?
+  uptimeSeconds   Int?
+
+  // Network stats (optional, depends on get-stats payload)
+  packetsInPerSec  Float?
+  packetsOutPerSec Float?
+  activeStreams    Int?
+
+  // Storage / generic counters (optional)
+  totalBytes       BigInt?
+  totalPages       Int?
+
+  createdAt       DateTime @default(now())
+}
+
