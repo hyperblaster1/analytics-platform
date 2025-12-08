@@ -11,12 +11,21 @@ model Pnode {
   id                Int               @id @default(autoincrement())
   address           String            @unique          // "ip:port" from get-pods
   version           String?                            // pNode version
-  lastSeen          DateTime?                          // derived from last_seen_timestamp
-  lastSeenTimestamp BigInt?                            // raw unix timestamp (seconds)
-  reachable         Boolean           @default(false)
-
+  pubkey            String?                            // pNode public key
+  
+  // Gossip timestamps (from get-pods)
+  gossipLastSeen          DateTime?                    // derived from last_seen_timestamp (gossip)
+  gossipLastSeenTimestamp BigInt?                     // raw unix timestamp from gossip (seconds)
+  
+  // Stats timestamps (from get-stats)
+  lastStatsAttemptAt  DateTime?      // when we last *tried* to call get-stats
+  lastStatsSuccessAt  DateTime?      // when get-stats last succeeded
+  nextStatsAllowedAt  DateTime?      // earliest time we are allowed to call get-stats again (for backoff)
+  
+  reachable         Boolean           @default(false)  // pRPC reachability (from get-stats)
   lastError         String?           // optional: store last connection error
-  failureCount      Int?              
+  failureCount      Int               @default(0)
+  
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 

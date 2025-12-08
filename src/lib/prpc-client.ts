@@ -43,7 +43,8 @@ export type GetStatsResult = {
 
 async function prpcCall<T>(
   baseUrl: string,
-  method: string
+  method: string,
+  timeoutMs: number = 4000
 ): Promise<T> {
   // Parse the base URL and construct the full RPC endpoint URL
   const cleanBaseUrl = baseUrl.trim().replace(/\/$/, '');
@@ -76,6 +77,38 @@ async function prpcCall<T>(
   });
 
   const json = await new Promise<PrpcResponse<T>>((resolve, reject) => {
+    let timeoutId: NodeJS.Timeout | null = null;
+    let isResolved = false;
+
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
+    const rejectOnce = (error: Error) => {
+      if (!isResolved) {
+        isResolved = true;
+        cleanup();
+        reject(error);
+      }
+    };
+
+    const resolveOnce = (value: PrpcResponse<T>) => {
+      if (!isResolved) {
+        isResolved = true;
+        cleanup();
+        resolve(value);
+      }
+    };
+
+    // Set timeout
+    timeoutId = setTimeout(() => {
+      req.destroy();
+      rejectOnce(new Error(`pRPC request timeout after ${timeoutMs}ms for ${method}`));
+    }, timeoutMs);
+
     const req = requestModule.request(
       rpcUrl,
       {
@@ -84,10 +117,11 @@ async function prpcCall<T>(
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(requestBody),
         },
+        timeout: timeoutMs,
       },
       (res) => {
         if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-          reject(new Error(`pRPC HTTP error ${res.statusCode} for ${method}`));
+          rejectOnce(new Error(`pRPC HTTP error ${res.statusCode} for ${method}`));
           return;
         }
 
@@ -102,16 +136,21 @@ async function prpcCall<T>(
             if (method === 'get-pods') {
               console.log(`[prpcCall] Response for ${method}:`, JSON.stringify(json, null, 2));
             }
-            resolve(json);
+            resolveOnce(json);
           } catch (e) {
-            reject(new Error(`Failed to parse JSON response: ${e}`));
+            rejectOnce(new Error(`Failed to parse JSON response: ${e}`));
           }
         });
       }
     );
 
     req.on('error', (err) => {
-      reject(new Error(`pRPC request failed for ${method}: ${err.message}`));
+      rejectOnce(new Error(`pRPC request failed for ${method}: ${err.message}`));
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      rejectOnce(new Error(`pRPC request timeout for ${method}`));
     });
 
     req.write(requestBody);
