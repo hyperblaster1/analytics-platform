@@ -14,6 +14,7 @@ export type PodInfo = {
   version?: string;
   last_seen?: string;          // human-readable
   last_seen_timestamp?: number;
+  pubkey?: string;             // pNode public key (if available)
 };
 
 export type GetPodsResult = {

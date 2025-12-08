@@ -1,256 +1,166 @@
 // src/lib/ingest.ts
-import { prisma } from './db';
+import { prisma } from '@/lib/db';
+import { ensureDefaultSeeds } from './seed-service';
 import { getPods, getStats, type PodInfo } from './prpc-client';
 
-const SEED_NODE = process.env.PRPC_SEED_NODE ?? 'http://192.190.136.36:6000';
-
-export type IngestionResult = {
-  ok: boolean;
-  podsUpdated: number;
-  statsAttempts: number;
-  statsSuccess: number;
-  statsFailure: number;
-  error?: string;
-};
-
-/**
- * Calculate the delay in seconds for exponential backoff
- */
-function calculateBackoffDelay(failureCount: number): number {
-  const baseSeconds = 60;
-  const cappedFailures = Math.min(failureCount, 5); // cap growth at 5
-  const delaySeconds = baseSeconds * Math.pow(2, cappedFailures);
-  return delaySeconds;
+function computeNextBackoff(failureCount: number, baseSeconds = 60): number {
+  const cappedFailures = Math.min(failureCount, 5);
+  return baseSeconds * Math.pow(2, cappedFailures);
 }
 
-/**
- * Check if a pnode is eligible for stats collection based on backoff rules
- */
-function isEligibleForStats(pnode: {
-  nextStatsAllowedAt: Date | null;
-}): boolean {
-  const now = new Date();
-  
-  // If nextStatsAllowedAt is null, treat as eligible (first time or pre-backoff migration)
-  if (pnode.nextStatsAllowedAt === null) {
-    return true;
-  }
-  
-  // If nextStatsAllowedAt is in the future, skip (respect backoff)
-  if (pnode.nextStatsAllowedAt > now) {
-    return false;
-  }
-  
-  // Otherwise, eligible
-  return true;
-}
+export async function runIngestionCycle() {
+  const seeds = await ensureDefaultSeeds();
 
-/**
- * Process a batch of pnodes in parallel to fetch stats
- */
-async function processStatsBatch(
-  pnodes: Array<{ id: number; address: string; failureCount: number }>,
-  concurrency: number = 10
-): Promise<{ success: number; failure: number }> {
-  const results = { success: 0, failure: 0 };
+  let totalPods = 0;
+  let gossipObs = 0;
+  let statsAttempts = 0;
+  let statsSuccess = 0;
+  let statsFailure = 0;
+
   const now = new Date();
 
-  // Process in batches with controlled concurrency
-  for (let i = 0; i < pnodes.length; i += concurrency) {
-    const batch = pnodes.slice(i, i + concurrency);
-    
-    // Process batch in parallel
-    const batchResults = await Promise.allSettled(
-      batch.map(async (pnode) => {
-        // Extract IP address and construct pod URL (always use port 6000)
-        const ipAddress = pnode.address.split(':')[0];
-        const podUrl = `http://${ipAddress}:6000`;
+  for (const seed of seeds) {
+    if (!seed.enabled) continue;
 
-        console.log(`→ Fetching stats for pod ${pnode.address} (${podUrl})`);
+    const baseUrl = seed.baseUrl;
+    let podsResult: { pods: PodInfo[] } | PodInfo[];
 
-        try {
-          const stats = await getStats(podUrl);
-
-          // On success:
-          // - Set failureCount = 0
-          // - Set lastStatsAttemptAt = now
-          // - Set lastStatsSuccessAt = now
-          // - Set nextStatsAllowedAt = now + 60s
-          const nextAllowedAt = new Date(now.getTime() + 60 * 1000);
-
-          await prisma.pnode.update({
-            where: { id: pnode.id },
-            data: {
-              reachable: true,
-              failureCount: 0,
-              lastError: null,
-              lastStatsAttemptAt: now,
-              lastStatsSuccessAt: now,
-              nextStatsAllowedAt: nextAllowedAt,
-            },
-          });
-
-          // Insert stats sample
-          await prisma.pnodeStatSample.create({
-            data: {
-              pnodeId: pnode.id,
-              cpuPercent: stats.cpu_percent ?? null,
-              ramUsedBytes: stats.ram?.used ? BigInt(stats.ram.used) : null,
-              ramTotalBytes: stats.ram?.total ? BigInt(stats.ram.total) : null,
-              uptimeSeconds: stats.uptime_seconds ?? null,
-              packetsInPerSec: stats.network?.packets_in_per_sec ?? null,
-              packetsOutPerSec: stats.network?.packets_out_per_sec ?? null,
-              activeStreams: stats.network?.active_streams ?? null,
-              totalBytes: stats.storage?.total_bytes
-                ? BigInt(stats.storage.total_bytes)
-                : null,
-              totalPages: stats.storage?.total_pages ?? null,
-            },
-          });
-
-          return { success: true, pnodeId: pnode.id, address: pnode.address };
-        } catch (err) {
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          const truncatedError = errorMessage.length > 500 
-            ? errorMessage.substring(0, 500) + '...' 
-            : errorMessage;
-
-          console.error(`Failed to ingest stats for pod ${pnode.address}:`, errorMessage);
-
-          // On failure:
-          // - Increment failureCount
-          // - Set lastStatsAttemptAt = now
-          // - Set nextStatsAllowedAt = now + delaySeconds (using exponential backoff)
-          const newFailureCount = pnode.failureCount + 1;
-          const delaySeconds = calculateBackoffDelay(newFailureCount);
-          const nextAllowedAt = new Date(now.getTime() + delaySeconds * 1000);
-
-          await prisma.pnode.update({
-            where: { id: pnode.id },
-            data: {
-              reachable: false,
-              failureCount: newFailureCount,
-              lastError: truncatedError,
-              lastStatsAttemptAt: now,
-              nextStatsAllowedAt: nextAllowedAt,
-            },
-          });
-
-          return { success: false, pnodeId: pnode.id, address: pnode.address };
-        }
-      })
-    );
-
-    // Count successes and failures
-    for (const batchResult of batchResults) {
-      if (batchResult.status === 'fulfilled') {
-        if (batchResult.value.success) {
-          results.success++;
-        } else {
-          results.failure++;
-        }
-      } else {
-        // Promise.allSettled should not reject, but handle it just in case
-        results.failure++;
-        console.error('Unexpected rejection in batch processing:', batchResult.reason);
-      }
+    try {
+      podsResult = await getPods(baseUrl);
+    } catch (err) {
+      console.error(`Failed get-pods from seed ${baseUrl}`, err);
+      continue;
     }
-  }
 
-  return results;
-}
-
-/**
- * Run one complete ingestion cycle:
- * 1. Call getPods on seed node and upsert all pods
- * 2. For each pnode in DB, check eligibility and call getStats if eligible (in parallel)
- */
-export async function runIngestion(): Promise<IngestionResult> {
-  const result: IngestionResult = {
-    ok: true,
-    podsUpdated: 0,
-    statsAttempts: 0,
-    statsSuccess: 0,
-    statsFailure: 0,
-  };
-
-  try {
-    // Step 1: Discover pods from seed node
-    console.log('Using seed node:', SEED_NODE);
-    const podsResult = await getPods(SEED_NODE);
-    
     // Handle different response structures
     const pods: PodInfo[] = Array.isArray(podsResult) 
       ? podsResult 
-      : podsResult.pods || [];
-    const count = Array.isArray(podsResult) 
-      ? podsResult.length 
-      : podsResult.count ?? pods.length;
-    
-    console.log(`Found ${count} pods`);
+      : (podsResult as any).pods || [];
 
-    // Step 2: Upsert all pods (update address, version, pubkey, gossipLastSeen, gossipLastSeenTimestamp)
-    // Don't touch failureCount, lastStatsAttemptAt, nextStatsAllowedAt, or reachable here
+    totalPods += pods.length;
+
     for (const pod of pods) {
-      const address = pod.address;
-      const gossipLastSeen = pod.last_seen_timestamp !== undefined
-        ? new Date(pod.last_seen_timestamp * 1000)
-        : undefined;
+      const { address, version, last_seen_timestamp, pubkey } = pod;
 
-      await prisma.pnode.upsert({
-        where: { address },
-        update: {
-          version: pod.version,
-          gossipLastSeenTimestamp: pod.last_seen_timestamp
-            ? BigInt(pod.last_seen_timestamp)
-            : null,
-          gossipLastSeen: gossipLastSeen ?? null,
-          // Don't update failureCount, lastStatsAttemptAt, nextStatsAllowedAt, or reachable here
-        },
-        create: {
+      // 1) Upsert Pnode by pubkey
+      let pnode;
+      if (pubkey) {
+        pnode = await prisma.pnode.upsert({
+          where: { pubkey },
+          update: {},
+          create: { pubkey },
+        });
+      } else {
+        // fallback: create an anonymous pnode if none exists
+        // (you may later improve this to avoid duplicates)
+        pnode = await prisma.pnode.create({
+          data: { pubkey: null },
+        });
+      }
+
+      // 2) Insert gossip observation
+      await prisma.pnodeGossipObservation.create({
+        data: {
+          seedId: seed.id,
+          pnodeId: pnode.id,
           address,
-          version: pod.version,
-          gossipLastSeenTimestamp: pod.last_seen_timestamp
-            ? BigInt(pod.last_seen_timestamp)
-            : null,
-          gossipLastSeen: gossipLastSeen ?? null,
-          reachable: false,
-          failureCount: 0,
+          version: version ?? null,
+          lastSeenTimestamp:
+            last_seen_timestamp != null ? BigInt(last_seen_timestamp) : null,
+          observedAt: now,
         },
       });
-    }
+      gossipObs++;
 
-    result.podsUpdated = pods.length;
+      // 3) Decide if we should call get-stats for this pnode (global backoff)
+      // Re-read current backoff state, in case it changed
+      const freshPnode = await prisma.pnode.findUnique({
+        where: { id: pnode.id },
+      });
+      if (!freshPnode) continue;
 
-    // Step 3: For each pnode in DB, check eligibility and call getStats if eligible (in parallel)
-    const allPnodes = await prisma.pnode.findMany();
+      const { nextStatsAllowedAt, failureCount } = freshPnode;
 
-    // Filter eligible pnodes
-    const eligiblePnodes = allPnodes.filter((pnode) => {
-      if (!isEligibleForStats(pnode)) {
-        console.log(`→ Skipping pod ${pnode.address} (backoff until ${pnode.nextStatsAllowedAt})`);
-        return false;
+      if (nextStatsAllowedAt && nextStatsAllowedAt > now) {
+        // respect backoff
+        continue;
       }
-      return true;
-    });
 
-    result.statsAttempts = eligiblePnodes.length;
+      statsAttempts++;
 
-    if (eligiblePnodes.length > 0) {
-      // Process eligible pnodes in parallel batches
-      const batchResults = await processStatsBatch(eligiblePnodes, 10);
-      result.statsSuccess = batchResults.success;
-      result.statsFailure = batchResults.failure;
+      // Extract IP address and construct pod URL (always use port 6000)
+      const ipAddress = address.split(':')[0];
+      const statsBaseUrl = `http://${ipAddress}:6000`;
+
+      try {
+        const stats = await getStats(statsBaseUrl);
+
+        // Record stats
+        await prisma.pnodeStatsSample.create({
+          data: {
+            pnodeId: pnode.id,
+            seedId: seed.id,
+            timestamp: new Date(),
+            cpuPercent: stats.cpu_percent ?? null,
+            ramUsedBytes: stats.ram?.used
+              ? BigInt(stats.ram.used)
+              : null,
+            ramTotalBytes: stats.ram?.total
+              ? BigInt(stats.ram.total)
+              : null,
+            uptimeSeconds: stats.uptime_seconds ?? null,
+            packetsInPerSec: stats.network?.packets_in_per_sec ?? null,
+            packetsOutPerSec: stats.network?.packets_out_per_sec ?? null,
+            totalBytes: stats.storage?.total_bytes != null 
+              ? BigInt(stats.storage.total_bytes) 
+              : null,
+            activeStreams: stats.network?.active_streams ?? null,
+          },
+        });
+
+        // Update backoff state on success
+        await prisma.pnode.update({
+          where: { id: pnode.id },
+          data: {
+            reachable: true,
+            failureCount: 0,
+            lastStatsAttemptAt: now,
+            lastStatsSuccessAt: now,
+            nextStatsAllowedAt: new Date(now.getTime() + 60 * 1000),
+          },
+        });
+
+        statsSuccess++;
+      } catch (err) {
+        console.error(
+          `get-stats failed for ${address} from seed ${baseUrl}`,
+          err,
+        );
+
+        const newFailureCount = (failureCount ?? 0) + 1;
+        const delaySeconds = computeNextBackoff(newFailureCount, 60);
+
+        await prisma.pnode.update({
+          where: { id: pnode.id },
+          data: {
+            reachable: false,
+            failureCount: newFailureCount,
+            lastStatsAttemptAt: now,
+            nextStatsAllowedAt: new Date(now.getTime() + delaySeconds * 1000),
+          },
+        });
+
+        statsFailure++;
+      }
     }
-
-    console.log('Ingestion run completed.');
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    console.error('Fatal error in ingestion:', errorMessage);
-    result.ok = false;
-    result.error = errorMessage;
   }
 
-  return result;
+  return {
+    seedsCount: seeds.length,
+    totalPods,
+    gossipObs,
+    statsAttempts,
+    statsSuccess,
+    statsFailure,
+  };
 }
-

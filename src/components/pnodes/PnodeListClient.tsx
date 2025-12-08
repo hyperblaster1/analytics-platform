@@ -1,8 +1,11 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { ThemeToggle } from '@/components/ui/theme-toggle';
 
-type PnodeSample = {
+type LatestStats = {
+  timestamp: string;
   cpuPercent: number | null;
   ramUsedBytes: number | null;
   ramTotalBytes: number | null;
@@ -11,24 +14,32 @@ type PnodeSample = {
   packetsOutPerSec: number | null;
   totalBytes: number | null;
   activeStreams: number | null;
-  timestamp: string;
 };
 
-type PnodeWithLatestSample = {
+type GlobalPnode = {
   id: number;
-  address: string;
-  version: string | null;
-  pubkey?: string | null;
+  pubkey: string | null;
   reachable: boolean;
-  gossipLastSeen: string | null;
-  lastStatsSuccessAt: string | null;
-  lastStatsAttemptAt: string | null;
   failureCount: number;
-  samples: PnodeSample[];
+  lastStatsAttemptAt: string | null;
+  lastStatsSuccessAt: string | null;
+  latestAddress: string | null;
+  latestVersion: string | null;
+  gossipLastSeen: string | null;
+  seedIdsSeen: number[];
+  seedsSeenCount: number;
+  latestStats: LatestStats | null;
+};
+
+type Seed = {
+  id: number;
+  name: string;
+  baseUrl: string;
 };
 
 type PnodeListClientProps = {
-  pnodes: PnodeWithLatestSample[];
+  seeds: Seed[];
+  globalPnodes: GlobalPnode[];
 };
 
 type LayoutMode = 'grid' | 'list';
@@ -47,9 +58,9 @@ type ReachabilityFilter = 'all' | 'reachable' | 'unreachable';
 function Progress({ value, className = '' }: { value: number; className?: string }) {
   const clampedValue = Math.min(Math.max(value, 0), 100);
   return (
-    <div className={`h-2 bg-gray-200 rounded-full overflow-hidden ${className}`}>
+    <div className={`h-2 bg-gray-200 dark:bg-zinc-800 rounded-full overflow-hidden ${className}`}>
       <div
-        className="h-full bg-blue-600 transition-all duration-300"
+        className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
         style={{ width: `${clampedValue}%` }}
       />
     </div>
@@ -67,9 +78,9 @@ function Badge({
 }) {
   const baseClasses = 'px-2 py-1 text-xs font-medium rounded';
   const variantClasses = {
-    default: 'bg-blue-100 text-blue-800 border border-blue-200',
-    outline: 'bg-transparent text-gray-700 border border-gray-300',
-    destructive: 'bg-red-100 text-red-800 border border-red-200',
+    default: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800',
+    outline: 'bg-transparent text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-zinc-700',
+    destructive: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800',
   };
   return (
     <span className={`${baseClasses} ${variantClasses[variant]} ${className}`}>
@@ -87,7 +98,7 @@ function Card({
 }) {
   return (
     <div
-      className={`bg-white border border-gray-200 rounded-lg shadow-sm ${className}`}
+      className={`bg-white/80 dark:bg-[#09090b] border border-gray-200 dark:border-zinc-800 rounded-lg shadow-sm backdrop-blur-sm ${className}`}
     >
       {children}
     </div>
@@ -136,10 +147,10 @@ function PnodeCard({
   node,
   layout,
 }: {
-  node: PnodeWithLatestSample;
+  node: GlobalPnode;
   layout: 'grid' | 'list';
 }) {
-  const latest = node.samples[0];
+  const latest = node.latestStats;
   const isList = layout === 'list';
 
   const ramUsed = latest?.ramUsedBytes ?? 0;
@@ -157,44 +168,36 @@ function PnodeCard({
       <CardHeader className={isList ? 'flex-1' : ''}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <div className="font-mono text-xs break-all">{node.address}</div>
+            <div className="font-mono text-xs break-all">{node.latestAddress ?? 'N/A'}</div>
             {node.pubkey && (
-              <div className="text-xs text-gray-500 mt-1">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 {shortPubkey(node.pubkey)}
               </div>
             )}
           </div>
           <div className="flex flex-col items-end gap-1 flex-shrink-0">
-            <Badge variant="outline">{node.version ?? 'Unknown'}</Badge>
+            <Badge variant="outline">{node.latestVersion ?? 'Unknown'}</Badge>
             <Badge variant={node.reachable ? 'default' : 'destructive'}>
               {node.reachable ? 'Reachable' : 'Unreachable'}
             </Badge>
           </div>
         </div>
-        {/* Show both gossip and stats timestamps for clarity */}
+        {/* Show gossip last seen */}
         <div className="mt-2 space-y-1">
           {node.gossipLastSeen && (
-            <div className="text-xs text-gray-500">
-              Gossip: {formatLastSeen(node.gossipLastSeen)}
+            <div className="text-xs text-gray-500 dark:text-gray-400">
+              Last seen: {formatLastSeen(node.gossipLastSeen)}
             </div>
           )}
           {node.lastStatsSuccessAt ? (
-            <div className="text-xs text-gray-500">
+            <div className="text-xs text-gray-500 dark:text-gray-400">
               pRPC: {formatLastSeen(node.lastStatsSuccessAt)}
             </div>
           ) : (
-            <div className="text-xs text-gray-400">
+            <div className="text-xs text-gray-400 dark:text-gray-500">
               pRPC: never
             </div>
           )}
-        </div>
-        {/* Debug output - temporary */}
-        <div className="mt-2 text-[10px] text-gray-400 space-y-1 border-t border-gray-200 pt-2">
-          <div>reachable: {String(node.reachable)}</div>
-          <div>gossipLastSeen: {node.gossipLastSeen || 'null'}</div>
-          <div>lastStatsSuccessAt: {node.lastStatsSuccessAt || 'null'}</div>
-          <div>lastStatsAttemptAt: {node.lastStatsAttemptAt || 'null'}</div>
-          <div>failureCount: {node.failureCount}</div>
         </div>
       </CardHeader>
       <CardContent className={isList ? 'flex-1' : ''}>
@@ -247,7 +250,7 @@ function PnodeCard({
             </div>
           </div>
         ) : (
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-gray-500 dark:text-gray-400">
             Stats unavailable (pRPC not reachable).
           </div>
         )}
@@ -256,24 +259,56 @@ function PnodeCard({
   );
 }
 
-export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
+export default function PnodeListClient({ seeds, globalPnodes }: PnodeListClientProps) {
+  const router = useRouter();
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [sortOption, setSortOption] = useState<SortOption>('version-desc');
   const [reachFilter, setReachFilter] = useState<ReachabilityFilter>('all');
   const [versionFilter, setVersionFilter] = useState<string>('all');
+  const [selectedSeedId, setSelectedSeedId] = useState<number | null>(null);
+  const [ingestMode, setIngestMode] = useState<'auto' | 'manual'>('auto');
+
+  // Auto-ingestion effect
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+
+    async function runIngestAndRefresh() {
+      try {
+        await fetch('/api/ingest', { method: 'POST' });
+        router.refresh();
+      } catch (e) {
+        console.error('Auto ingest failed', e);
+      }
+    }
+
+    if (ingestMode === 'auto') {
+      interval = setInterval(() => {
+        void runIngestAndRefresh();
+      }, 60_000); // 60 seconds
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [ingestMode, router]);
 
   // Get unique versions for filter
   const uniqueVersions = useMemo(() => {
     const versions = new Set<string>();
-    pnodes.forEach((node) => {
-      if (node.version) versions.add(node.version);
+    globalPnodes.forEach((node) => {
+      if (node.latestVersion) versions.add(node.latestVersion);
     });
     return Array.from(versions).sort();
-  }, [pnodes]);
+  }, [globalPnodes]);
 
   // Process and filter/sort nodes
   const processedPnodes = useMemo(() => {
-    let items = [...pnodes];
+    let items = [...globalPnodes];
+
+    // Filter by seed
+    if (selectedSeedId !== null) {
+      items = items.filter((n) => n.seedIdsSeen.includes(selectedSeedId));
+    }
 
     // Filter by reachability
     if (reachFilter === 'reachable') {
@@ -284,7 +319,7 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
 
     // Filter by version
     if (versionFilter !== 'all') {
-      items = items.filter((n) => (n.version ?? '') === versionFilter);
+      items = items.filter((n) => (n.latestVersion ?? '') === versionFilter);
     }
 
     // Sorting
@@ -307,8 +342,8 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
     };
 
     items.sort((a, b) => {
-      const latestA = a.samples[0];
-      const latestB = b.samples[0];
+      const latestA = a.latestStats;
+      const latestB = b.latestStats;
 
       const uptimeA = latestA?.uptimeSeconds ?? 0;
       const uptimeB = latestB?.uptimeSeconds ?? 0;
@@ -321,9 +356,9 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
 
       switch (sortOption) {
         case 'version-desc':
-          return compareSemver(b.version, a.version);
+          return compareSemver(b.latestVersion, a.latestVersion);
         case 'version-asc':
-          return compareSemver(a.version, b.version);
+          return compareSemver(a.latestVersion, b.latestVersion);
         case 'uptime-desc':
           return uptimeB - uptimeA;
         case 'uptime-asc':
@@ -342,22 +377,60 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
     });
 
     return items;
-  }, [pnodes, reachFilter, versionFilter, sortOption]);
+  }, [globalPnodes, reachFilter, versionFilter, sortOption, selectedSeedId]);
 
   return (
-    <div>
-      {/* Controls Bar */}
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div className="flex flex-col gap-4">
+      {/* Top Bar - Full Width */}
+      <header className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 dark:border-zinc-800 bg-background/80 dark:bg-[#09090b]/80 px-4 py-3 shadow-sm backdrop-blur-sm">
+        {/* Left: brand */}
+        <div className="flex items-center gap-2">
+          <span className="text-lg font-semibold tracking-tight">Xandeum</span>
+        </div>
+
+        {/* Center: seed selector */}
+        <div className="flex flex-1 justify-center">
+          <select
+            value={selectedSeedId ?? 'all'}
+            onChange={(e) => setSelectedSeedId(e.target.value === 'all' ? null : Number(e.target.value))}
+            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          >
+            <option value="all">View from all seeds</option>
+            {seeds.map((seed) => (
+              <option key={seed.id} value={seed.id}>
+                {seed.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Right: Manual/Auto + theme toggle */}
+        <div className="flex items-center gap-4">
+          {/* Manual/Auto button */}
+          <button
+            onClick={() => setIngestMode(ingestMode === 'auto' ? 'manual' : 'auto')}
+            className="px-3 py-1.5 text-sm font-medium rounded-md border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors"
+          >
+            {ingestMode === 'auto' ? 'Auto' : 'Manual'}
+          </button>
+          <ThemeToggle />
+        </div>
+      </header>
+
+      {/* Content Area - Max Width 1400px */}
+      <div className="w-full max-w-[1400px] mx-auto flex flex-col gap-4">
+        {/* Controls Bar */}
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         {/* Left section: layout + reach filter */}
         <div className="flex flex-wrap items-center gap-2">
           {/* Layout toggle */}
-          <div className="flex border border-gray-300 rounded-md overflow-hidden">
+          <div className="flex border border-gray-300 dark:border-zinc-700 rounded-md overflow-hidden">
             <button
               onClick={() => setLayoutMode('grid')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 layoutMode === 'grid'
                   ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                  : 'bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800'
               }`}
             >
               Grid
@@ -367,7 +440,7 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 layoutMode === 'list'
                   ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                  : 'bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800'
               }`}
             >
               List
@@ -375,13 +448,13 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
           </div>
 
           {/* Reachability toggle */}
-          <div className="flex border border-gray-300 rounded-md overflow-hidden">
+          <div className="flex border border-gray-300 dark:border-zinc-700 rounded-md overflow-hidden">
             <button
               onClick={() => setReachFilter('all')}
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 reachFilter === 'all'
                   ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                  : 'bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800'
               }`}
             >
               All
@@ -391,7 +464,7 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 reachFilter === 'reachable'
                   ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                  : 'bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800'
               }`}
             >
               Reachable
@@ -401,7 +474,7 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
               className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                 reachFilter === 'unreachable'
                   ? 'bg-blue-600 text-white'
-                  : 'bg-white text-gray-700 hover:bg-gray-50'
+                  : 'bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-zinc-800'
               }`}
             >
               Unreachable
@@ -415,7 +488,7 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
           <select
             value={sortOption}
             onChange={(e) => setSortOption(e.target.value as SortOption)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="version-desc">Version (High → Low)</option>
             <option value="version-asc">Version (Low → High)</option>
@@ -431,7 +504,7 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
           <select
             value={versionFilter}
             onChange={(e) => setVersionFilter(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="px-3 py-1.5 text-sm border border-gray-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           >
             <option value="all">All Versions</option>
             {uniqueVersions.map((version) => (
@@ -441,27 +514,27 @@ export default function PnodeListClient({ pnodes }: PnodeListClientProps) {
             ))}
           </select>
         </div>
-      </div>
+        </div>
 
-      {/* Cards */}
-      {processedPnodes.length === 0 ? (
-        <div className="text-center py-12 text-gray-600">
-          No pNodes match the current filters.
-        </div>
-      ) : layoutMode === 'grid' ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {processedPnodes.map((node) => (
-            <PnodeCard key={node.id} node={node} layout="grid" />
-          ))}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {processedPnodes.map((node) => (
-            <PnodeCard key={node.id} node={node} layout="list" />
-          ))}
-        </div>
-      )}
+        {/* Cards */}
+        {processedPnodes.length === 0 ? (
+          <div className="text-center py-12 text-gray-600 dark:text-gray-400">
+            No pNodes match the current filters.
+          </div>
+        ) : layoutMode === 'grid' ? (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {processedPnodes.map((node) => (
+              <PnodeCard key={node.id} node={node} layout="grid" />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {processedPnodes.map((node) => (
+              <PnodeCard key={node.id} node={node} layout="list" />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
-
