@@ -3,144 +3,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
-
-type LatestStats = {
-  timestamp: string;
-  cpuPercent: number | null;
-  ramUsedBytes: number | null;
-  ramTotalBytes: number | null;
-  uptimeSeconds: number | null;
-  packetsInPerSec: number | null;
-  packetsOutPerSec: number | null;
-  totalBytes: number | null;
-  activeStreams: number | null;
-};
-
-type GlobalPnode = {
-  id: number;
-  pubkey: string | null;
-  reachable: boolean;
-  failureCount: number;
-  lastStatsAttemptAt: string | null;
-  lastStatsSuccessAt: string | null;
-  latestAddress: string | null;
-  latestVersion: string | null;
-  gossipLastSeen: string | null;
-  seedIdsSeen: number[];
-  seedsSeenCount: number;
-  latestStats: LatestStats | null;
-};
-
-type Seed = {
-  id: number;
-  name: string;
-  baseUrl: string;
-};
-
-type PnodeListClientProps = {
-  seeds: Seed[];
-  globalPnodes: GlobalPnode[];
-};
-
-type LayoutMode = 'grid' | 'list';
-type SortOption =
-  | 'version-desc'
-  | 'version-asc'
-  | 'uptime-desc'
-  | 'uptime-asc'
-  | 'active-streams-desc'
-  | 'active-streams-asc'
-  | 'last-seen-desc'
-  | 'last-seen-asc';
-type ReachabilityFilter = 'all' | 'reachable' | 'unreachable';
-
-// Simple UI Components
-function Progress({ value, className = '' }: { value: number; className?: string }) {
-  const clampedValue = Math.min(Math.max(value, 0), 100);
-  return (
-    <div className={`h-2 bg-gray-200 dark:bg-zinc-800 rounded-full overflow-hidden ${className}`}>
-      <div
-        className="h-full bg-blue-600 dark:bg-blue-500 transition-all duration-300"
-        style={{ width: `${clampedValue}%` }}
-      />
-    </div>
-  );
-}
-
-function Badge({
-  children,
-  variant = 'default',
-  className = '',
-}: {
-  children: React.ReactNode;
-  variant?: 'default' | 'outline' | 'destructive';
-  className?: string;
-}) {
-  const baseClasses = 'px-2 py-1 text-xs font-medium rounded';
-  const variantClasses = {
-    default: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800',
-    outline: 'bg-transparent text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-zinc-700',
-    destructive: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 border border-red-200 dark:border-red-800',
-  };
-  return (
-    <span className={`${baseClasses} ${variantClasses[variant]} ${className}`}>
-      {children}
-    </span>
-  );
-}
-
-function Card({
-  children,
-  className = '',
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`rounded-lg shadow-sm bg-[var(--card-bg)] border border-[var(--card-border)] ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function CardHeader({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`p-4 ${className}`}>{children}</div>;
-}
-
-function CardContent({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <div className={`p-4 pt-0 ${className}`}>{children}</div>;
-}
-
-// Helper functions
-function shortPubkey(pubkey: string): string {
-  if (pubkey.length <= 12) return pubkey;
-  return `${pubkey.slice(0, 4)}...${pubkey.slice(-4)}`;
-}
-
-function formatLastSeen(lastSeen: string): string {
-  const date = new Date(lastSeen);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins} min ago`;
-  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-  if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
-  return date.toLocaleDateString();
-}
-
-function toHumanBytes(value: number): string {
-  if (value >= 1_099_511_627_776) return `${(value / 1_099_511_627_776).toFixed(2)} TB`;
-  if (value >= 1_073_741_824) return `${(value / 1_073_741_824).toFixed(2)} GB`;
-  if (value >= 1_048_576) return `${(value / 1_048_576).toFixed(2)} MB`;
-  if (value >= 1024) return `${(value / 1024).toFixed(2)} KB`;
-  return `${value} B`;
-}
+import {
+  LatestStats,
+  GlobalPnode,
+  Seed,
+  PnodeListClientProps,
+  LayoutMode,
+  SortOption,
+  ReachabilityFilter,
+} from '../types';
+import { shortPubkey, formatLastSeen, toHumanBytes } from '../utils';
+import { Progress } from './components/Progress';
+import { Badge } from './components/Badge';
+import { Card, CardHeader, CardContent } from './components/Card';
 
 // PnodeCard Component
 function PnodeCard({
@@ -259,7 +134,7 @@ function PnodeCard({
   );
 }
 
-export default function PnodeListClient({ seeds, globalPnodes }: PnodeListClientProps) {
+export default function PnodesClient({ seeds, globalPnodes }: PnodeListClientProps) {
   const router = useRouter();
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [sortOption, setSortOption] = useState<SortOption>('version-desc');
@@ -544,3 +419,4 @@ export default function PnodeListClient({ seeds, globalPnodes }: PnodeListClient
     </div>
   );
 }
+

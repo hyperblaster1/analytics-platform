@@ -3,6 +3,18 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  
+  /* Card and top bar colors - Light mode */
+  --card-bg: #ffffff;
+  --card-border: #cbd5e1;
+  --text-primary: #0f172a;
+  --page-bg: #ffffff;
+  
+  /* Form controls - Light mode */
+  --input-bg: #ffffff;
+  --input-border: #d1d5db;
+  --input-text: #374151;
+  --input-hover-bg: #f9fafb;
 }
 
 @theme inline {
@@ -18,53 +30,27 @@ body {
 }
 
 body {
-  @apply bg-white text-slate-900;
+  @apply bg-white;
+  color: var(--text-primary);
   font-family: Arial, Helvetica, sans-serif;
   min-height: 100vh;
 }
 
 /* Dark theme base */
+html.dark {
+  --card-bg: #0f0f12;
+  --card-border: #3f3f46;
+  --text-primary: #ffffff;
+  --page-bg: #09090b;
+  
+  /* Form controls - Dark mode */
+  --input-bg: #18181b;
+  --input-border: #3f3f46;
+  --input-text: #f4f4f5;
+  --input-hover-bg: #27272a;
+}
+
 html.dark body {
-  background-color: #09090b;
-  color: #f9fafb;
-}
-
-/* Light base + gradients */
-.bg-base-layer {
-  background-color: #f8fafc;
-}
-
-.bg-gradient-layer {
-  background:
-    radial-gradient(circle at 20% 25%, #DFF3ED 0%, transparent 60%),
-    radial-gradient(circle at 80% 20%, #E8EEFF 0%, transparent 65%),
-    radial-gradient(circle at 30% 80%, #EAE7F7 0%, transparent 70%),
-    radial-gradient(circle at 70% 75%, #F7F5EF 0%, transparent 70%);
-  background-size: cover;
-  background-repeat: no-repeat;
-}
-
-/* Dark mode: keep pastels, but very subtle on dark base */
-html.dark .bg-base-layer {
-  background-color: #09090b;
-}
-
-html.dark .bg-gradient-layer {
-  background:
-    radial-gradient(circle at 20% 25%, rgba(223, 243, 237, 0.08), transparent 60%),
-    radial-gradient(circle at 80% 20%, rgba(232, 238, 255, 0.07), transparent 65%),
-    radial-gradient(circle at 30% 80%, rgba(234, 231, 247, 0.06), transparent 70%),
-    radial-gradient(circle at 70% 75%, rgba(247, 245, 239, 0.06), transparent 70%);
-}
-
-/* Shimmer animation for soft glow panels */
-@keyframes shimmer {
-  0% {
-    opacity: 0.15;
-    transform: translateY(0px);
-  }
-  100% {
-    opacity: 0.35;
-    transform: translateY(20px);
-  }
+  background-color: var(--page-bg);
+  color: var(--text-primary);
 }
