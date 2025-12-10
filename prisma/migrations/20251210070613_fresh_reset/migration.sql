@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE "Seed" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
     "name" TEXT,
@@ -57,4 +57,3 @@ CREATE UNIQUE INDEX "Seed_baseUrl_key" ON "Seed"("baseUrl");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Pnode_pubkey_key" ON "Pnode"("pubkey");
-

@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { ThemeToggle } from '@/components/ui/theme-toggle';
 import {
   LatestStats,
@@ -134,23 +133,53 @@ function PnodeCard({
   );
 }
 
-export default function PnodesClient({ seeds, globalPnodes }: PnodeListClientProps) {
-  const router = useRouter();
+export default function PnodesClient({ seeds: initialSeeds, globalPnodes: initialGlobalPnodes }: PnodeListClientProps) {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('grid');
   const [sortOption, setSortOption] = useState<SortOption>('version-desc');
   const [reachFilter, setReachFilter] = useState<ReachabilityFilter>('all');
   const [versionFilter, setVersionFilter] = useState<string>('all');
   const [selectedSeedId, setSelectedSeedId] = useState<number | null>(null);
   const [ingestMode, setIngestMode] = useState<'auto' | 'manual'>('auto');
+  
+  // Store seeds and pnodes in state so we can update them after ingestion
+  const [seeds, setSeeds] = useState<Seed[]>(initialSeeds);
+  const [globalPnodes, setGlobalPnodes] = useState<GlobalPnode[]>(initialGlobalPnodes);
 
-  // Auto-ingestion effect
+  // Update state when props change on initial mount only
+  useEffect(() => {
+    setSeeds(initialSeeds);
+    setGlobalPnodes(initialGlobalPnodes);
+  }, [initialSeeds, initialGlobalPnodes]);
+
+  // Function to fetch updated data from the API
+  const fetchUpdatedData = useCallback(async () => {
+    try {
+      const response = await fetch('/api/pnodes', { 
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch pnodes: ${response.status}`);
+      }
+      const data = await response.json();
+      
+      if (data.seeds && Array.isArray(data.seeds)) {
+        setSeeds(data.seeds);
+      }
+      if (data.globalPnodes && Array.isArray(data.globalPnodes)) {
+        setGlobalPnodes(data.globalPnodes);
+      }
+    } catch (e) {
+      console.error('Failed to fetch updated pnodes', e);
+    }
+  }, []);
+
+  // Ingestion effect - runs independently every 60 seconds
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
 
-    async function runIngestAndRefresh() {
+    async function runIngest() {
       try {
         await fetch('/api/ingest', { method: 'POST' });
-        router.refresh();
       } catch (e) {
         console.error('Auto ingest failed', e);
       }
@@ -158,18 +187,33 @@ export default function PnodesClient({ seeds, globalPnodes }: PnodeListClientPro
 
     if (ingestMode === 'auto') {
       // Run immediately on mount (fixes 1-minute delay on fresh install)
-      void runIngestAndRefresh();
+      void runIngest();
       
       // Then set up interval for subsequent runs
       interval = setInterval(() => {
-        void runIngestAndRefresh();
+        void runIngest();
       }, 60_000); // 60 seconds
     }
 
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [ingestMode, router]);
+  }, [ingestMode]);
+
+  // Data polling effect - polls continuously every 5 seconds
+  useEffect(() => {
+    // Fetch immediately on mount
+    fetchUpdatedData();
+    
+    // Then set up polling interval
+    const pollInterval = setInterval(() => {
+      fetchUpdatedData();
+    }, 5000); // 5 seconds
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [fetchUpdatedData]);
 
   // Get unique versions for filter
   const uniqueVersions = useMemo(() => {
