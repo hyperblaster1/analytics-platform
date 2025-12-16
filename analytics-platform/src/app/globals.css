@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  
+  /* Surface colors - Light mode */
+  --surface: #ffffff;
+  --surface-border: #e2e8f0;
+  --page-bg: #ffffff;
+  
+  /* Text colors - Light mode */
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  
+  /* Form controls - Light mode */
+  --input-bg: #ffffff;
+  --input-border: #e2e8f0;
+  --input-text: #374151;
+  --input-hover-bg: #f9fafb;
+  
+  /* Semantic colors - Light mode */
+  /* Primary/Accent: Blue hue (217°), higher saturation, lower luminance for light mode */
+  --primary: #3b82f6; /* hsl(217, 91%, 59%) - selected tabs, active buttons, progress bars, reachable state */
+  /* Danger: Red hue (0°), toned down saturation for light mode */
+  --danger: #dc2626; /* hsl(0, 73%, 50%) - unreachable/private state, errors, failed counts */
+  /* Muted: Neutral gray (not blue-gray) for backgrounds and dividers */
+  --muted: #f4f4f5; /* Neutral gray background */
+  /* Muted foreground: Neutral gray for labels, secondary text, "N/A" states */
+  --muted-foreground: #71717a; /* Neutral gray text - labels, secondary text, placeholders */
+  /* Border: Subtle neutral gray for dividers and card borders */
+  --border: #e4e4e7; /* Neutral gray border */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-border: var(--surface-border);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-primary: var(--primary);
+  --color-danger: var(--danger);
+  --color-border: var(--border);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-white;
+  color: var(--text-primary);
+  font-family: Arial, Helvetica, sans-serif;
+  min-height: 100vh;
+}
+
+/* Dark theme base */
+html.dark {
+  /* Surface colors - Dark mode */
+  --surface: #0f0f12;
+  --surface-border: #3f3f46;
+  --page-bg: #09090b;
+  
+  /* Text colors - Dark mode */
+  --text-primary: #ffffff;
+  --text-secondary: #94a3b8;
+  
+  /* Form controls - Dark mode */
+  --input-bg: #18181b;
+  --input-border: #3f3f46;
+  --input-text: #f4f4f5;
+  --input-hover-bg: #27272a;
+  
+  /* Semantic colors - Dark mode */
+  /* Primary/Accent: Same blue hue (217°), adjusted luminance for dark mode, passes WCAG */
+  --primary: #60a5fa; /* hsl(217, 96%, 70%) - same hue identity, higher luminance for dark */
+  /* Danger: Same red hue (0°), adjusted for dark mode */
+  --danger: #f87171; /* hsl(0, 90%, 71%) - same hue identity, higher luminance for dark */
+  /* Muted: Cool gray with low contrast for backgrounds and dividers */
+  --muted: #27272a; /* Cool gray background */
+  /* Muted foreground: Cool gray with low contrast for labels and secondary text */
+  --muted-foreground: #a1a1aa; /* Cool gray text - labels, secondary text, placeholders */
+  /* Border: Cool gray for dividers and card borders */
+  --border: #3f3f46; /* Cool gray border */
+}
+
+html.dark body {
+  background-color: var(--page-bg);
+  color: var(--text-primary);
+}
+
+/* Legacy variable mappings for backward compatibility */
+:root {
+  --card-bg: var(--surface);
+  --card-border: var(--surface-border);
+}
+
+html.dark {
+  --card-bg: var(--surface);
+  --card-border: var(--surface-border);
+}
