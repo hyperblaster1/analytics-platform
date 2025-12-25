@@ -1,6 +1,6 @@
 // ingestionWorker/lib/prpc-client.ts
-import * as http from 'http';
-import * as https from 'https';
+import * as http from "http";
+import * as https from "https";
 
 export type PrpcResponse<T> = {
   jsonrpc: string;
@@ -10,18 +10,25 @@ export type PrpcResponse<T> = {
 };
 
 export type PodInfo = {
-  address: string;             // "ip:port"
+  address: string; // "ip:port"
   version?: string;
-  last_seen?: string;          // human-readable
+  last_seen?: string; // human-readable
   last_seen_timestamp?: number;
-  pubkey?: string;             // pNode public key (if available)
+  pubkey?: string; // pNode public key (if available)
+  // Storage fields from get-pods-with-stats
+  storage_committed?: number;
+  storage_used?: number;
+  storage_usage_percent?: number; // Decimal (0-1) or percentage (0-100)?
+  uptime?: number; // in seconds
+  is_public?: boolean;
 };
 
-export type GetPodsResult = {
-  count?: number;
+export type GetPodsWithStatsResult = {
   pods?: PodInfo[];
-  // Handle case where result might be an array directly
-} | PodInfo[];
+  total_count?: number;
+};
+
+export type GetPodsResult = GetPodsWithStatsResult | PodInfo[];
 
 // Actual get-stats response structure
 export type GetStatsResult = {
@@ -45,8 +52,8 @@ async function prpcCall<T>(
   timeoutMs: number = 2500
 ): Promise<T> {
   // Parse the base URL and construct the full RPC endpoint URL
-  const cleanBaseUrl = baseUrl.trim().replace(/\/$/, '');
-  
+  const cleanBaseUrl = baseUrl.trim().replace(/\/$/, "");
+
   // Validate and parse the URL
   let parsedUrl: URL;
   try {
@@ -54,22 +61,24 @@ async function prpcCall<T>(
   } catch (e) {
     throw new Error(`Invalid base URL format: ${cleanBaseUrl}. Error: ${e}`);
   }
-  
+
   // Ensure it's http or https
-  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
-    throw new Error(`Unsupported protocol: ${parsedUrl.protocol}. Only http and https are supported.`);
+  if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+    throw new Error(
+      `Unsupported protocol: ${parsedUrl.protocol}. Only http and https are supported.`
+    );
   }
-  
+
   // Construct the RPC endpoint URL
-  const rpcUrl = new URL('/rpc', parsedUrl);
-  
+  const rpcUrl = new URL("/rpc", parsedUrl);
+
   console.log(`[prpcCall] Calling ${method} at ${rpcUrl.toString()}`);
-  
+
   // Use native http/https modules as undici has issues with some URLs
-  const requestModule = rpcUrl.protocol === 'https:' ? https : http;
-  
+  const requestModule = rpcUrl.protocol === "https:" ? https : http;
+
   const requestBody = JSON.stringify({
-    jsonrpc: '2.0',
+    jsonrpc: "2.0",
     method,
     id: 1,
   });
@@ -104,30 +113,34 @@ async function prpcCall<T>(
     // Set timeout
     timeoutId = setTimeout(() => {
       req.destroy();
-      rejectOnce(new Error(`pRPC request timeout after ${timeoutMs}ms for ${method}`));
+      rejectOnce(
+        new Error(`pRPC request timeout after ${timeoutMs}ms for ${method}`)
+      );
     }, timeoutMs);
 
     const req = requestModule.request(
       rpcUrl,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(requestBody),
+          "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(requestBody),
         },
         timeout: timeoutMs,
       },
       (res) => {
         if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-          rejectOnce(new Error(`pRPC HTTP error ${res.statusCode} for ${method}`));
+          rejectOnce(
+            new Error(`pRPC HTTP error ${res.statusCode} for ${method}`)
+          );
           return;
         }
 
-        let data = '';
-        res.on('data', (chunk) => {
+        let data = "";
+        res.on("data", (chunk) => {
           data += chunk;
         });
-        res.on('end', () => {
+        res.on("end", () => {
           try {
             const json = JSON.parse(data) as PrpcResponse<T>;
             resolveOnce(json);
@@ -138,11 +151,13 @@ async function prpcCall<T>(
       }
     );
 
-    req.on('error', (err) => {
-      rejectOnce(new Error(`pRPC request failed for ${method}: ${err.message}`));
+    req.on("error", (err) => {
+      rejectOnce(
+        new Error(`pRPC request failed for ${method}: ${err.message}`)
+      );
     });
 
-    req.on('timeout', () => {
+    req.on("timeout", () => {
       req.destroy();
       rejectOnce(new Error(`pRPC request timeout for ${method}`));
     });
@@ -165,11 +180,12 @@ async function prpcCall<T>(
 }
 
 export async function getPods(baseUrl: string): Promise<GetPodsResult> {
-  return prpcCall<GetPodsResult>(baseUrl, 'get-pods');
+  // Use get-pods-with-stats to get storage data in one call
+  return prpcCall<GetPodsResult>(baseUrl, "get-pods-with-stats");
 }
 
 export async function getStats(baseUrl: string): Promise<GetStatsResult> {
-  return prpcCall<GetStatsResult>(baseUrl, 'get-stats');
+  return prpcCall<GetStatsResult>(baseUrl, "get-stats");
 }
 
 export type StorageCreditsResult = {
@@ -185,13 +201,13 @@ export type StorageCreditsResult = {
  * Endpoint: https://podcredits.xandeum.network/api/pods-credits
  */
 export async function getStorageCredits(): Promise<StorageCreditsResult> {
-  const url = 'https://podcredits.xandeum.network/api/pods-credits';
-  
+  const url = "https://podcredits.xandeum.network/api/pods-credits";
+
   try {
     const response = await fetch(url, {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       // 10 second timeout for credits API
       signal: AbortSignal.timeout(10000),
@@ -208,4 +224,3 @@ export async function getStorageCredits(): Promise<StorageCreditsResult> {
     throw error;
   }
 }
-

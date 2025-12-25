@@ -3,22 +3,22 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-  
+
   /* Surface colors - Light mode */
   --surface: #ffffff;
   --surface-border: #e2e8f0;
   --page-bg: #ffffff;
-  
+
   /* Text colors - Light mode */
   --text-primary: #0f172a;
   --text-secondary: #64748b;
-  
+
   /* Form controls - Light mode */
   --input-bg: #ffffff;
   --input-border: #e2e8f0;
   --input-text: #374151;
   --input-hover-bg: #f9fafb;
-  
+
   /* Semantic colors - Light mode */
   /* Primary/Accent: Blue hue (217°), higher saturation, lower luminance for light mode */
   --primary: #3b82f6; /* hsl(217, 91%, 59%) - selected tabs, active buttons, progress bars, reachable state */
@@ -48,13 +48,18 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Add dark mode background variable */
+html.dark {
+  --background: var(--page-bg);
+}
+
 html,
 body {
   height: 100%;
 }
 
 body {
-  @apply bg-white;
+  background-color: var(--page-bg);
   color: var(--text-primary);
   font-family: Arial, Helvetica, sans-serif;
   min-height: 100vh;
@@ -66,17 +71,17 @@ html.dark {
   --surface: #0f0f12;
   --surface-border: #3f3f46;
   --page-bg: #09090b;
-  
+
   /* Text colors - Dark mode */
   --text-primary: #ffffff;
   --text-secondary: #94a3b8;
-  
+
   /* Form controls - Dark mode */
   --input-bg: #18181b;
   --input-border: #3f3f46;
   --input-text: #f4f4f5;
   --input-hover-bg: #27272a;
-  
+
   /* Semantic colors - Dark mode */
   /* Primary/Accent: Same blue hue (217°), adjusted luminance for dark mode, passes WCAG */
   --primary: #60a5fa; /* hsl(217, 96%, 70%) - same hue identity, higher luminance for dark */
@@ -88,11 +93,6 @@ html.dark {
   --muted-foreground: #a1a1aa; /* Cool gray text - labels, secondary text, placeholders */
   /* Border: Cool gray for dividers and card borders */
   --border: #3f3f46; /* Cool gray border */
-}
-
-html.dark body {
-  background-color: var(--page-bg);
-  color: var(--text-primary);
 }
 
 /* Legacy variable mappings for backward compatibility */

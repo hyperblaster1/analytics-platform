@@ -1,9 +1,12 @@
 // ingestionWorker/lib/ingest.ts
-import { prisma } from './db';
-import { DEFAULT_SEEDS } from '../config/seeds';
-import { getPods, getStats, type PodInfo, type GetPodsResult } from './prpc-client';
-import { computeBytesPerSecond } from './storage-analytics';
-import type { PnodeStatsSample } from '@prisma/client';
+import { prisma } from "./db";
+import { DEFAULT_SEEDS } from "../config/seeds";
+import {
+  getPods,
+  getStats,
+  type PodInfo,
+  type GetPodsResult,
+} from "./prpc-client";
 
 function computeNextBackoff(failureCount: number, baseSeconds = 60): number {
   const cappedFailures = Math.min(failureCount, 5);
@@ -20,7 +23,7 @@ export async function runIngestionCycle() {
   let statsFailure = 0;
 
   const now = new Date();
-  
+
   // Track backoff globally (deduplicate by pnodeId across all seeds)
   const backoffPnodeIds = new Set<number>();
   // Track globally unique observed pnodes across all seeds
@@ -36,8 +39,8 @@ export async function runIngestionCycle() {
         podsResult = await getPods(baseUrl);
       } catch (err) {
         console.error(`Failed get-pods from seed ${baseUrl}`, err);
-        return { 
-          pods: [], 
+        return {
+          pods: [],
           statsTasks: [],
           seedBaseUrl: seed.baseUrl,
           attempted: 0,
@@ -47,11 +50,12 @@ export async function runIngestionCycle() {
       }
 
       // Handle different response structures
-      const pods: PodInfo[] = Array.isArray(podsResult) 
-        ? podsResult 
-        : ('pods' in podsResult && Array.isArray(podsResult.pods))
-          ? podsResult.pods
-          : [];
+      // get-pods-with-stats returns { pods: [], total_count: number }
+      const pods: PodInfo[] = Array.isArray(podsResult)
+        ? podsResult
+        : "pods" in podsResult && Array.isArray(podsResult.pods)
+        ? podsResult.pods
+        : [];
 
       // Track per-seed metrics
       let seedAttempted = 0;
@@ -63,77 +67,105 @@ export async function runIngestionCycle() {
         pods
           .filter((pod) => pod.pubkey) // Skip pods without pubkey (should not happen, but defensive)
           .map(async (pod) => {
-          const { address, version, last_seen_timestamp, pubkey } = pod;
-
-          try {
-            // 1) Upsert Pnode by pubkey (unique and persistent identifier)
-            // pubkey is guaranteed to exist due to filter above
-            const pnode = await prisma.pnode.upsert({
-              where: { pubkey: pubkey! },
-              update: {},
-              create: { pubkey: pubkey! },
-            });
-
-            // Track observed pnode for this seed
-            seedObservedPnodeIds.add(pnode.id);
-            // Track globally unique observed pnode
-            globalObservedPnodeIds.add(pnode.id);
-
-            // 2) Insert gossip observation with current address
-            await prisma.pnodeGossipObservation.create({
-              data: {
-                seedBaseUrl: seed.baseUrl,
-                pnodeId: pnode.id,
-                address,
-                version: version ?? null,
-                lastSeenTimestamp:
-                  last_seen_timestamp != null ? BigInt(last_seen_timestamp) : null,
-                observedAt: now,
-              },
-            });
-
-            // 3) Check if we should call get-stats for this pnode
-            const freshPnode = await prisma.pnode.findUnique({
-              where: { id: pnode.id },
-            });
-
-            if (!freshPnode) {
-              return null;
-            }
-
-            const { nextStatsAllowedAt, failureCount } = freshPnode;
-
-            if (nextStatsAllowedAt && nextStatsAllowedAt > now) {
-              // respect backoff - track globally (deduplicated by pnodeId)
-              backoffPnodeIds.add(pnode.id);
-              seedBackoff++;
-              return null;
-            }
-
-            // This pnode will be attempted
-            seedAttempted++;
-
-            // Extract IP address and construct pod URL (always use port 6000)
-            const ipAddress = address.split(':')[0];
-            const statsBaseUrl = `http://${ipAddress}:6000`;
-
-            return {
-              pnodeId: pnode.id,
-              seedBaseUrl: seed.baseUrl,
+            const {
               address,
-              statsBaseUrl,
-              failureCount: failureCount ?? 0,
-              baseUrl,
-            };
-          } catch (err) {
-            // Log pod processing failures for debugging
-            console.error(
-              `[Ingestion] Failed to process pod ${address} (pubkey: ${pubkey}) from seed ${baseUrl}:`,
-              err
-            );
-            throw err; // Re-throw to be caught by Promise.allSettled
-          }
-        })
+              version,
+              last_seen_timestamp,
+              pubkey,
+              storage_committed,
+              storage_used,
+              storage_usage_percent,
+              is_public,
+            } = pod;
+
+            try {
+              // 1) Upsert Pnode by pubkey (unique and persistent identifier)
+              // pubkey is guaranteed to exist due to filter above
+              // Update isPublic from the latest gossip observation if available
+              const pnode = await prisma.pnode.upsert({
+                where: { pubkey: pubkey! },
+                update: {
+                  isPublic: is_public ?? false,
+                },
+                create: {
+                  pubkey: pubkey!,
+                  isPublic: is_public ?? false,
+                },
+              });
+
+              // Track observed pnode for this seed
+              seedObservedPnodeIds.add(pnode.id);
+              // Track globally unique observed pnode
+              globalObservedPnodeIds.add(pnode.id);
+
+              // 2) Insert gossip observation with current address and storage data
+              await prisma.pnodeGossipObservation.create({
+                data: {
+                  seedBaseUrl: seed.baseUrl,
+                  pnodeId: pnode.id,
+                  address,
+                  version: version ?? null,
+                  lastSeenTimestamp:
+                    last_seen_timestamp != null
+                      ? BigInt(last_seen_timestamp)
+                      : null,
+                  observedAt: now,
+                  storageCommitted:
+                    storage_committed != null
+                      ? BigInt(storage_committed)
+                      : null,
+                  storageUsed:
+                    storage_used != null ? BigInt(storage_used) : null,
+                  storageUsagePercent:
+                    storage_usage_percent != null
+                      ? storage_usage_percent
+                      : null,
+                  isPublic: is_public ?? null,
+                },
+              });
+
+              // 3) Check if we should call get-stats for this pnode
+              const freshPnode = await prisma.pnode.findUnique({
+                where: { id: pnode.id },
+              });
+
+              if (!freshPnode) {
+                return null;
+              }
+
+              const { nextStatsAllowedAt, failureCount } = freshPnode;
+
+              if (nextStatsAllowedAt && nextStatsAllowedAt > now) {
+                // respect backoff - track globally (deduplicated by pnodeId)
+                backoffPnodeIds.add(pnode.id);
+                seedBackoff++;
+                return null;
+              }
+
+              // This pnode will be attempted
+              seedAttempted++;
+
+              // Extract IP address and construct pod URL (always use port 6000)
+              const ipAddress = address.split(":")[0];
+              const statsBaseUrl = `http://${ipAddress}:6000`;
+
+              return {
+                pnodeId: pnode.id,
+                seedBaseUrl: seed.baseUrl,
+                address,
+                statsBaseUrl,
+                failureCount: failureCount ?? 0,
+                baseUrl,
+              };
+            } catch (err) {
+              // Log pod processing failures for debugging
+              console.error(
+                `[Ingestion] Failed to process pod ${address} (pubkey: ${pubkey}) from seed ${baseUrl}:`,
+                err
+              );
+              throw err; // Re-throw to be caught by Promise.allSettled
+            }
+          })
       );
 
       const statsTasks: Array<{
@@ -148,22 +180,22 @@ export async function runIngestionCycle() {
       // Track failed pods for debugging
       let failedPods = 0;
       for (const result of podResults) {
-        if (result.status === 'fulfilled' && result.value !== null) {
+        if (result.status === "fulfilled" && result.value !== null) {
           statsTasks.push(result.value);
-        } else if (result.status === 'rejected') {
+        } else if (result.status === "rejected") {
           failedPods++;
           // Error already logged in the try-catch above
         }
       }
-      
+
       if (failedPods > 0) {
         console.warn(
           `[Ingestion] Seed ${baseUrl}: ${failedPods}/${pods.length} pods failed to process`
         );
       }
 
-      return { 
-        pods, 
+      return {
+        pods,
         statsTasks,
         seedBaseUrl: seed.baseUrl,
         attempted: seedAttempted,
@@ -184,21 +216,24 @@ export async function runIngestionCycle() {
   }> = [];
 
   // Track per-seed stats from seed processing
-  const seedStatsMap = new Map<string, {
-    seedBaseUrl: string;
-    attempted: number;
-    backoff: number;
-    observed: number;
-    success: number;
-    failed: number;
-  }>();
+  const seedStatsMap = new Map<
+    string,
+    {
+      seedBaseUrl: string;
+      attempted: number;
+      backoff: number;
+      observed: number;
+      success: number;
+      failed: number;
+    }
+  >();
 
   for (const seedResult of seedResults) {
-    if (seedResult.status === 'fulfilled') {
+    if (seedResult.status === "fulfilled") {
       totalPods += seedResult.value.pods.length;
       gossipObs += seedResult.value.pods.length;
       allStatsTasks.push(...seedResult.value.statsTasks);
-      
+
       // Initialize per-seed stats
       seedStatsMap.set(seedResult.value.seedBaseUrl, {
         seedBaseUrl: seedResult.value.seedBaseUrl,
@@ -211,12 +246,40 @@ export async function runIngestionCycle() {
     }
   }
 
-  statsAttempts = allStatsTasks.length;
+  // DEDUPLICATE: Only keep first task per pnodeId to avoid redundant API calls
+  // If 3 seeds all see the same node, we only need to fetch stats once
+  const uniqueStatsTasks = new Map<number, (typeof allStatsTasks)[0]>();
+  for (const task of allStatsTasks) {
+    if (!uniqueStatsTasks.has(task.pnodeId)) {
+      uniqueStatsTasks.set(task.pnodeId, task);
+    }
+  }
+  const deduplicatedStatsTasks = Array.from(uniqueStatsTasks.values());
 
-  // Process ALL stats requests in parallel
+  // Log deduplication savings
+  if (allStatsTasks.length !== deduplicatedStatsTasks.length) {
+    console.log(
+      `[Ingestion] Deduplicated stats tasks: ${allStatsTasks.length} → ${
+        deduplicatedStatsTasks.length
+      } (saved ${
+        allStatsTasks.length - deduplicatedStatsTasks.length
+      } redundant calls)`
+    );
+  }
+
+  statsAttempts = deduplicatedStatsTasks.length;
+
+  // Process DEDUPLICATED stats requests in parallel
   const statsResults = await Promise.allSettled(
-    allStatsTasks.map(async (task) => {
-      const { pnodeId, seedBaseUrl, address, statsBaseUrl, failureCount, baseUrl } = task;
+    deduplicatedStatsTasks.map(async (task) => {
+      const {
+        pnodeId,
+        seedBaseUrl,
+        address,
+        statsBaseUrl,
+        failureCount,
+        baseUrl,
+      } = task;
 
       try {
         const stats = await getStats(statsBaseUrl);
@@ -224,20 +287,19 @@ export async function runIngestionCycle() {
         // Extract fields from actual API response structure
         const latestTotalBytes =
           stats.total_bytes != null ? BigInt(stats.total_bytes) : null;
-        const ramUsed = stats.ram_used != null ? BigInt(stats.ram_used) : null;
-        const ramTotal =
-          stats.ram_total != null ? BigInt(stats.ram_total) : null;
         const uptimeSeconds = stats.uptime != null ? stats.uptime : null;
         const activeStreams = stats.active_streams ?? null;
         const packetsReceivedCumulative =
-          stats.packets_received != null ? BigInt(stats.packets_received) : null;
+          stats.packets_received != null
+            ? BigInt(stats.packets_received)
+            : null;
         const packetsSentCumulative =
           stats.packets_sent != null ? BigInt(stats.packets_sent) : null;
 
         // Get previous sample for this pnode (any seed or same seed; choose simplest)
         const prevSample = await prisma.pnodeStatsSample.findFirst({
           where: { pnodeId },
-          orderBy: { timestamp: 'desc' },
+          orderBy: { timestamp: "desc" },
         });
 
         const latestSampleTimestamp = new Date();
@@ -274,39 +336,12 @@ export async function runIngestionCycle() {
           }
         }
 
-        // Create a temporary sample object for rate calculation
-        // Only the fields used by computeBytesPerSecond need to be present
-        const tempLatestSample: PnodeStatsSample = {
-          id: 0,
-          pnodeId,
-          seedBaseUrl: seedBaseUrl ?? null,
-          timestamp: latestSampleTimestamp,
-          cpuPercent: stats.cpu_percent ?? null,
-          ramUsedBytes: ramUsed,
-          ramTotalBytes: ramTotal,
-          uptimeSeconds,
-          packetsInPerSec,
-          packetsOutPerSec,
-          packetsReceivedCumulative: null,
-          packetsSentCumulative: null,
-          totalBytes: latestTotalBytes,
-          activeStreams,
-          deltaBytes: null,
-          deltaSeconds: null,
-          bytesPerSecond: null,
-        };
-
-        const rate = computeBytesPerSecond(prevSample, tempLatestSample);
-
         // Record stats
         await prisma.pnodeStatsSample.create({
           data: {
             pnodeId,
             seedBaseUrl,
             timestamp: latestSampleTimestamp,
-            cpuPercent: stats.cpu_percent ?? null,
-            ramUsedBytes: ramUsed,
-            ramTotalBytes: ramTotal,
             uptimeSeconds,
             packetsInPerSec,
             packetsOutPerSec,
@@ -314,17 +349,14 @@ export async function runIngestionCycle() {
             packetsSentCumulative,
             totalBytes: latestTotalBytes,
             activeStreams,
-            deltaBytes: rate.deltaBytes,
-            deltaSeconds: rate.deltaSeconds,
-            bytesPerSecond: rate.bytesPerSecond,
           },
         });
 
         // Update backoff state on success
+        // Note: isPublic should be set from gossip data, not stats success
         await prisma.pnode.update({
           where: { id: pnodeId },
           data: {
-            reachable: true,
             failureCount: 0,
             lastStatsAttemptAt: now,
             lastStatsSuccessAt: now,
@@ -336,7 +368,7 @@ export async function runIngestionCycle() {
       } catch (err) {
         console.error(
           `get-stats failed for ${address} from seed ${baseUrl}`,
-          err,
+          err
         );
 
         const newFailureCount = failureCount + 1;
@@ -345,7 +377,6 @@ export async function runIngestionCycle() {
         await prisma.pnode.update({
           where: { id: pnodeId },
           data: {
-            reachable: false,
             failureCount: newFailureCount,
             lastStatsAttemptAt: now,
             nextStatsAllowedAt: new Date(now.getTime() + delaySeconds * 1000),
@@ -359,7 +390,7 @@ export async function runIngestionCycle() {
 
   // Count successes and failures (global and per-seed)
   for (const result of statsResults) {
-    if (result.status === 'fulfilled') {
+    if (result.status === "fulfilled") {
       const value = result.value;
       if (value.success) {
         statsSuccess++;
@@ -395,4 +426,3 @@ export async function runIngestionCycle() {
     seedStats: Array.from(seedStatsMap.values()),
   };
 }
-

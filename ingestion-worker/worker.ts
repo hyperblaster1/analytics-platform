@@ -4,9 +4,8 @@ import "dotenv/config";
 import { prisma } from "./lib/db";
 import { runIngestionCycle } from "./lib/ingest";
 import { ingestCredits } from "./lib/ingest/credits";
-
-const INGEST_INTERVAL_SECONDS = 1200;
-const CREDITS_INTERVAL_HOURS = 2;
+import { computeNetworkMetrics } from "./lib/network-metrics";
+import { INGEST_INTERVAL_SECONDS, CREDITS_INTERVAL_SECONDS } from "./constants";
 
 async function runOnce() {
   const startedAt = new Date();
@@ -52,8 +51,26 @@ async function runOnce() {
       });
     }
 
+    // Compute and store network metrics
+    try {
+      await computeNetworkMetrics(run.id);
+      console.log(
+        `[IngestionWorker] Network metrics computed for run ${run.id}`
+      );
+    } catch (err) {
+      console.error(
+        `[IngestionWorker] Failed to compute network metrics for run ${run.id}:`,
+        err
+      );
+      // Don't fail the entire run if network metrics fail
+    }
+
+    const attemptsMsg =
+      stats.statsAttempts > 0
+        ? `${stats.statsSuccess}/${stats.statsAttempts} success`
+        : `0 attempts (all in backoff)`;
     console.log(
-      `[IngestionWorker] Run ${run.id} completed: ${stats.statsSuccess}/${stats.statsAttempts} success, ${stats.backoffCount} backoff, ${stats.statsFailure} failed`
+      `[IngestionWorker] Run ${run.id} completed: ${attemptsMsg}, ${stats.backoffCount} backoff, ${stats.statsFailure} failed`
     );
   } catch (e) {
     console.error(`[IngestionWorker] Run ${run.id} failed:`, e);
@@ -90,7 +107,7 @@ async function main() {
     `[IngestionWorker] Stats ingestion interval: ${INGEST_INTERVAL_SECONDS} seconds`
   );
   console.log(
-    `[IngestionWorker] Credits ingestion interval: ${CREDITS_INTERVAL_HOURS} hour(s)`
+    `[IngestionWorker] Credits ingestion interval: ${CREDITS_INTERVAL_SECONDS} seconds`
   );
 
   // Run stats ingestion once immediately on startup
@@ -111,10 +128,10 @@ async function main() {
     });
   }, INGEST_INTERVAL_SECONDS * 1000);
 
-  // Credits ingestion: every CREDITS_INTERVAL_HOURS
+  // Credits ingestion: every CREDITS_INTERVAL_SECONDS
   setInterval(() => {
     runCreditsOnce();
-  }, CREDITS_INTERVAL_HOURS * 60 * 60 * 1000);
+  }, CREDITS_INTERVAL_SECONDS * 1000);
 }
 
 // Handle graceful shutdown

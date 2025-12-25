@@ -14,7 +14,7 @@ model Pnode {
   updatedAt DateTime @updatedAt
 
   // GLOBAL fetch state for stats (exponential backoff, reachability, etc.)
-  reachable          Boolean   @default(false)
+  isPublic           Boolean   @default(false)
   failureCount       Int       @default(0)
   lastStatsAttemptAt DateTime?
   lastStatsSuccessAt DateTime?
@@ -40,6 +40,12 @@ model PnodeGossipObservation {
   version           String?
   lastSeenTimestamp BigInt? // raw unix timestamp from gossip (seconds)
   observedAt        DateTime @default(now())
+  
+  // Storage fields from get-pods-with-stats
+  storageCommitted     BigInt?
+  storageUsed          BigInt?
+  storageUsagePercent  Float?  // Decimal value (0-1 or 0-100, will convert to percentage)
+  isPublic             Boolean? // Visibility status from gossip API
 
   @@index([pnodeId])
   @@index([seedBaseUrl])
@@ -55,9 +61,6 @@ model PnodeStatsSample {
   seedBaseUrl String?
 
   timestamp                 DateTime @default(now())
-  cpuPercent                Float?
-  ramUsedBytes              BigInt?
-  ramTotalBytes             BigInt?
   uptimeSeconds             Int?
   packetsInPerSec           Float?
   packetsOutPerSec          Float?
@@ -65,11 +68,6 @@ model PnodeStatsSample {
   packetsSentCumulative     BigInt? // cumulative packets_sent for computing per-second
   totalBytes                BigInt?
   activeStreams             Int?
-
-  // Throughput-related data
-  deltaBytes     BigInt? // totalBytes_now - totalBytes_prev
-  deltaSeconds   Int? // seconds between samples
-  bytesPerSecond Float? // derived rate
 
   @@index([pnodeId])
   @@index([seedBaseUrl])
@@ -97,6 +95,7 @@ model IngestionRun {
   observed    Int       @default(0) // unique pnodes observed across all seeds
 
   seedStats   IngestionRunSeedStats[]
+  networkSnapshot NetworkSnapshot?
 
   @@index([startedAt])
 }
@@ -115,4 +114,75 @@ model IngestionRunSeedStats {
   @@unique([ingestionRunId, seedBaseUrl])
   @@index([ingestionRunId])
   @@index([seedBaseUrl])
+}
+
+model NetworkSnapshot {
+  id                     Int      @id @default(autoincrement())
+  ingestionRun           IngestionRun @relation(fields: [ingestionRunId], references: [id])
+  ingestionRunId         Int      @unique
+
+  totalNodes             Int
+  reachableNodes         Int
+  unreachableNodes       Int
+  reachablePercent       Float
+
+  medianUptimeSeconds    Int
+  p90UptimeSeconds       Int
+
+  totalStorageCommitted  BigInt
+  totalStorageUsed       BigInt
+
+  nodesBackedOff         Int
+  nodesFailingStats      Int
+
+  createdAt              DateTime @default(now())
+
+  versionStats           NetworkVersionStat[]
+  seedVisibility         NetworkSeedVisibility[]
+  creditsStat            NetworkCreditsStat?
+
+  @@index([ingestionRunId])
+  @@index([createdAt])
+}
+
+model NetworkVersionStat {
+  id              Int      @id @default(autoincrement())
+  networkSnapshot NetworkSnapshot @relation(fields: [networkSnapshotId], references: [id])
+  networkSnapshotId Int
+  ingestionRunId  Int
+  version         String
+  nodeCount       Int
+
+  @@index([ingestionRunId])
+  @@index([networkSnapshotId])
+}
+
+model NetworkSeedVisibility {
+  id              Int      @id @default(autoincrement())
+  networkSnapshot NetworkSnapshot @relation(fields: [networkSnapshotId], references: [id])
+  networkSnapshotId Int
+  ingestionRunId  Int
+  seedBaseUrl     String
+
+  nodesSeen       Int
+  freshNodes      Int
+  staleNodes      Int
+  offlineNodes    Int
+
+  @@index([ingestionRunId])
+  @@index([networkSnapshotId])
+  @@index([seedBaseUrl])
+}
+
+model NetworkCreditsStat {
+  id              Int      @id @default(autoincrement())
+  networkSnapshot NetworkSnapshot @relation(fields: [networkSnapshotId], references: [id], onDelete: Cascade)
+  networkSnapshotId Int      @unique
+  ingestionRunId  Int
+
+  medianCredits   Int
+  p90Credits      Int
+
+  @@index([ingestionRunId])
+  @@index([networkSnapshotId])
 }

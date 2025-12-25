@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import AppBackground from "@/app/components/AppBackground";
 import { ThemeProvider } from "next-themes";
 
 const geistSans = Geist({
@@ -29,11 +28,12 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased relative`}
       >
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
-          <AppBackground />
-          <div className="relative z-0">
-            {children}
-          </div>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="light"
+          enableSystem={false}
+        >
+          {children}
         </ThemeProvider>
       </body>
     </html>
