@@ -7,8 +7,8 @@ export const MAX_LIMIT = 500;
 export const MIN_LIMIT = 1;
 
 // Polling Intervals (milliseconds)
-export const PNODES_REFRESH_INTERVAL = 45000; // 45 seconds
-export const INGESTION_STATUS_POLL_INTERVAL = 45000; // 45 seconds
+export const PNODES_REFRESH_INTERVAL = 180000; // 3 minutes
+export const INGESTION_STATUS_POLL_INTERVAL = 180000; // 3 minutes
 export const COUNTDOWN_UPDATE_INTERVAL = 1000; // 1 second
 export const DRAWER_STATE_POLL_INTERVAL = 16; // 16ms for smooth UI
 export const LAST_SEEN_UPDATE_INTERVAL = 60000; // 1 minute
@@ -48,4 +48,3 @@ export const BYTES_PER_KB = 1024;
 export const BYTES_PER_MB = 1_048_576;
 export const BYTES_PER_GB = 1_073_741_824;
 export const BYTES_PER_TB = 1_099_511_627_776;
-
