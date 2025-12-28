@@ -14,7 +14,7 @@ export function Badge({
   className?: string;
 }) {
   const baseClasses =
-    "h-4 w-4 flex items-center justify-center rounded border text-xs";
+    "h-4 w-4 flex items-center justify-center rounded border text-xs border-[0.75px]";
   const variantClasses: Record<BadgeVariant, string> = {
     default: "border-primary text-primary bg-transparent",
     destructive: "border-danger text-danger bg-transparent",
