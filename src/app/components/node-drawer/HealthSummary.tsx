@@ -78,7 +78,7 @@ export const HealthSummary = React.memo(function HealthSummary({
                 cx={size / 2}
                 cy={size / 2}
                 r={radius}
-                stroke="hsl(var(--muted-foreground) / 0.2)"
+                stroke="#eeeeee"
                 strokeWidth={strokeWidth}
                 fill="none"
               />
