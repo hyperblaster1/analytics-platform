@@ -75,7 +75,7 @@ export function PnodeCard({ node }: PnodeCardProps) {
         {/* Tile 1: Header */}
         <div className="flex justify-between">
           <div className="flex-1 min-w-0">
-            <div className="font-mono flex justify-between text-xs break-all">
+            <div className="font-mono flex justify-between text-sm font-bold break-all">
               {node.latestAddress ?? "N/A"}
               <Badge variant={node.isPublic ? "default" : "destructive"}>
                 {node.isPublic ? (
